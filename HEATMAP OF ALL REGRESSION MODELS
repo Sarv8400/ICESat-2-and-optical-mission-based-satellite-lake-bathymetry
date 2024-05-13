@@ -1,0 +1,162 @@
+import pandas as pd
+import numpy as np
+from sklearn.metrics import r2_score
+from scipy.optimize import curve_fit
+from itertools import combinations
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Function for inverse curve fit
+def inverse_func(reflectance, a, b, c):
+    return (a / (reflectance + c)) + b
+
+# Load your data into a DataFrame (assuming your data is in a CSV file)
+data_landsat = pd.read_csv('path_to_landsat_data.csv')
+
+# Specify the dependent variable (y) and independent variables for Landsat data
+dependent_var_landsat = 'y'
+independent_vars_landsat = ['B', 'G', 'R', 'NIR']  # Updated column names
+
+# Load data for inverse reflectance model (assuming your data is in a CSV file)
+filename_inverse = 'path_to_inverse_data.csv'
+reflectance_combinations = ['B', 'G', 'R', 'NIR']  # List of reflectance combinations
+depth_column_inverse = 'y'  # Name of the depth column in the CSV file
+
+# List to store R-squared values for inverse reflectance model
+r2_values_inverse = []
+
+# Generate all possible combinations of reflectance bands
+combinations_list_all = []
+for r in range(1, len(reflectance_combinations) + 1):
+    combinations_list_all.extend(combinations(reflectance_combinations, r))
+
+# Iterate over each combination and calculate the R-squared values for inverse reflectance model
+for combination in combinations_list_all:
+    depths = []
+    reflectance = []
+
+    with open(filename_inverse, 'r') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            depth_str = row[depth_column_inverse]
+            if depth_str.strip():  # Check if the string is not empty or whitespace
+                depth = float(depth_str)
+                band_reflectance = sum(float(row[band]) for band in combination)
+                depths.append(depth)
+                reflectance.append(band_reflectance)
+
+    # Proceed with curve fitting calculations for non-empty depth values
+    if depths:
+        # Convert lists to numpy arrays
+        depths = np.array(depths)
+        reflectance = np.array(reflectance)
+
+        # Calculate inverse of reflectance values
+        inverse_reflectance = 1.0 / reflectance
+
+        # Set the maximum number of function evaluations
+        maxfev = 100000
+
+        # Perform inverse curve fit with increased maxfev
+        inverse_params, _ = curve_fit(inverse_func, inverse_reflectance, depths, maxfev=maxfev)
+
+        # Calculate residuals
+        residuals = depths - inverse_func(inverse_reflectance, *inverse_params)
+
+        # Calculate total sum of squares
+        ss_total = np.sum((depths - np.mean(depths)) ** 2)
+
+        # Calculate sum of squares of residuals
+        ss_residual = np.sum(residuals ** 2)
+
+        # Calculate R-squared
+        r_squared = max(0, 1.0 - (ss_residual / ss_total))  # Ensure R-squared is not negative
+
+        # Store R-squared value
+        r2_values_inverse.append(r_squared)
+
+# List to store R-squared values for each combination for Landsat data
+r2_values_landsat = []
+model_names_landsat = []
+combinations_list_landsat = []
+
+# Models to consider for Landsat data
+models = {
+    'Linear Regression': LinearRegression(),
+    'Polynomial Regression (Degree=2)': PolynomialFeatures(degree=2),
+    'Random Forest Regression': RandomForestRegressor(),
+    'Support Vector Regression': SVR()
+}
+
+# Iterate over models for Landsat data
+for model_name, model in models.items():
+    # Iterate over combinations of independent variables for Landsat data
+    for i in range(1, len(independent_vars_landsat) + 1):
+        for combination in itertools.combinations(independent_vars_landsat, i):
+            # Prepare X (independent variables) and y (dependent variable) for Landsat data
+            X = data_landsat[list(combination)]
+            y = data_landsat[dependent_var_landsat]
+
+            # Split data into training and testing sets for Landsat data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+            # Fit the model and make predictions for Landsat data
+            if isinstance(model, PolynomialFeatures):
+                poly = model
+                poly_X_train = poly.fit_transform(X_train)
+                poly_X_test = poly.transform(X_test)
+
+                linear_model = LinearRegression()
+                linear_model.fit(poly_X_train, y_train)
+                y_pred = linear_model.predict(poly_X_test)
+            else:
+                model.fit(X_train, y_train)
+                y_pred = model.predict(X_test)
+
+            # Calculate R-squared for the current combination and model for Landsat data
+            r2 = max(0, r2_score(y_test, y_pred))  # Ensure R-squared is not negative
+
+            # Store model name, combination, and R-squared for Landsat data
+            r2_values_landsat.append(r2)
+            model_names_landsat.append(model_name)
+            combinations_list_landsat.append(combination)
+
+# Combine the results into a DataFrame for Landsat data
+results_df_landsat = pd.DataFrame({'Model': model_names_landsat, 'Combination': combinations_list_landsat, 'R2_Score_Landsat': r2_values_landsat})
+
+# Combine the results into a DataFrame for inverse reflectance model
+results_df_inverse = pd.DataFrame({'Combination': [best_inverse_combination], 'R2_Score_Inverse': [np.max(r2_values_inverse)]})
+
+# Merge the two DataFrames based on the combination column
+merged_results_df = pd.merge(results_df_landsat, results_df_inverse, on='Combination', how='left')
+
+# Create a heatmap
+plt.figure(figsize=(12, 8))
+
+# Highlight maximum values within each column and annotate them with red text
+heatmap_data = merged_results_df.pivot_table(index='Combination', columns='Model', values='R2_Score_Landsat', aggfunc='max')
+heatmap_data_max = heatmap_data == heatmap_data.max()
+
+# Add R-squared values for inverse reflectance to the dataframe
+heatmap_data['Inverse Reflectance'] = r2_values_inverse
+
+# Plot the heatmap
+sns.heatmap(heatmap_data, cmap='YlGnBu', annot=True, fmt=".4f", cbar_kws={'label': 'R-squared'}, linewidths=0.5, linecolor='black')
+
+# Annotate maximum values in each column with red text
+for col in heatmap_data.columns:
+    max_val = heatmap_data[col].max()
+    max_idx = heatmap_data[heatmap_data[col] == max_val].index[0]
+    plt.text(list(heatmap_data.columns).index(col) + 0.5, list(heatmap_data.index).index(max_idx) + 0.5, f'{max_val:.4f}', fontsize=10, ha='center', va='center', color='red')
+
+plt.title('Reflectance values of PlanetScope and ICESat-2 based depth of Tso Lhamo lake')
+plt.xlabel('Models')
+plt.ylabel('Depth with reflectance bands')
+plt.xticks(rotation=0)  # Rotate x-axis labels to horizontal
+plt.xticks(np.arange(0.5, len(models) + 1.5), [f'{name.split()[0]}\n{name.split()[1]}' for name in list(models.keys()) + ['Inverse Reflectance']])
+plt.yticks(rotation=0)
+plt.tight_layout()
+
+plt.savefig('path_to_save_figure.png', dpi=600)
+
+plt.show()
