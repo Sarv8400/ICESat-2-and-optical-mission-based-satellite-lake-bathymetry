@@ -1,0 +1,103 @@
+# STEP 1: Importing necessary libraries
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from itertools import combinations
+from sklearn.preprocessing import StandardScaler
+
+# Load the dataset from the specified path
+data = pd.read_csv('C:/Users/user/OneDrive - iitr.ac.in/sarvesh_bathymetry_work/sarrvesh_work/hema/Sarvesh_bathymetry_date_21march23/kyagar/KYAGAR_LANDSAT/PST POINT/PST_POINT_LANDSAT_KYAGAR.csv')
+
+# Extracting features (bands) and target variable
+X = data[['B02', 'B03', 'B04', 'B08']]  # Features: Blue, Green, Red, Near Infrared bands
+Y = data['y']  # to replace 'y' with the actual name of your target variable column (HERE IT IS ICESAT-2 BASED DEPTH)
+
+# Step 2: Create all possible combinations of the independent variables
+combs = list(combinations(X.columns, 1)) + \
+        list(combinations(X.columns, 2)) + \
+        list(combinations(X.columns, 3)) + \
+        list(combinations(X.columns, 4))
+
+# Step 3: Split the data into training and testing sets
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.7, random_state=42)
+
+# Step 4: Standardize the independent variables in the training and testing sets
+sc = StandardScaler()
+X_train_std = sc.fit_transform(X_train)
+X_test_std = sc.transform(X_test)
+
+# Step 5: Fit regression models for each combination of independent variables using the training set
+models = {}
+for comb in combs:
+    # Linear Regression Model
+    model_lr = LinearRegression().fit(X_train_std[:, [X_train.columns.get_loc(c) for c in comb]], Y_train)
+    # Polynomial Regression Model with degree 2
+    poly = PolynomialFeatures(degree=2, include_bias=False)
+    X_train_comb_poly = poly.fit_transform(X_train_std[:, [X_train.columns.get_loc(c) for c in comb]])
+    model_pr = LinearRegression().fit(X_train_comb_poly, Y_train)
+    # Support Vector Regression Model
+    model_svr = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=0.1).fit(X_train_std[:, [X_train.columns.get_loc(c) for c in comb]], Y_train)
+    # Random Forest Regression Model
+    model_rfr = RandomForestRegressor(n_estimators=10, random_state=42).fit(X_train_std[:, [X_train.columns.get_loc(c) for c in comb]], Y_train)
+    models[comb] = [model_lr, model_pr, model_svr, model_rfr]
+
+# Step 6: Predict the values of the dependent variable for each combination of independent variables using the corresponding regression model from step 5 on the testing set
+Y_pred = {}
+for comb in combs:
+    X_test_comb = X_test_std[:, [X_test.columns.get_loc(c) for c in comb]]
+    model_lr, model_pr, model_svr, model_rfr = models[comb]
+    Y_pred[comb] = [model_lr.predict(X_test_comb),
+                    model_pr.predict(poly.fit_transform(X_test_comb)),
+                    model_svr.predict(X_test_comb),
+                    model_rfr.predict(X_test_comb)]
+
+# Step 7: Evaluate the performance of each model using R-squared, RMSE, and MAE
+results = []
+for comb in combs:
+    r2_list, rmse_list, mae_list = [], [], []
+    for i in range(4):
+        r2 = r2_score(Y_test, Y_pred[comb][i])
+        rmse = np.sqrt(mean_squared_error(Y_test, Y_pred[comb][i]))
+        mae = mean_absolute_error(Y_test, Y_pred[comb][i])
+        r2_list.append(r2)
+        rmse_list.append(rmse)
+        mae_list.append(mae)
+    results.append([", ".join(comb), r2_list[0], rmse_list[0], mae_list[0],
+                    r2_list[1], rmse_list[1], mae_list[1],
+                    r2_list[2], rmse_list[2], mae_list[2],
+                    r2_list[3], rmse_list[3], mae_list[3]])
+
+# Step 8: Write the results to a CSV file
+results_df = pd.DataFrame(results, columns=["Independent Variables", 
+                                             "Linear R-squared", "Linear RMSE", "Linear MAE",
+                                             "Polynomial R-squared", "Polynomial RMSE", "Polynomial MAE",
+                                             "SVR R-squared", "SVR RMSE", "SVR MAE",
+                                             "Random Forest R-squared", "Random Forest RMSE", "Random Forest MAE"])
+
+# Step 9: Load the new CSV file and select the same independent variables as the training set
+new_data = pd.read_csv('your_path_to_new_csv_file.csv')
+X_new = new_data[['B02','B03','B04','B08']]
+
+# Step 10: Standardize the independent variables in the new CSV file
+X_new_std = sc.transform(X_new)
+
+# Step 11: Use the loaded regression models to predict the values of the dependent variable for each combination of independent variables in the new CSV file
+Y_new_pred = {}
+for comb in combs:
+    X_new_comb = X_new_std[:, [X_new.columns.get_loc(c) for c in comb]]
+    model_lr, model_pr, model_svr, model_rfr = models[comb]
+    Y_new_pred[comb] = [model_lr.predict(X_new_comb),
+                        model_pr.predict(poly.fit_transform(X_new_comb)),
+                        model_svr.predict(X_new_comb),
+                        model_rfr.predict(X_new_comb)]
+
+# Step 12: Store the predicted values in a new CSV file
+Y_new_pred_df = pd.DataFrame(Y_new_pred)
+Y_new_pred_df.to_csv("predicted_values.csv", index=False)
+
+
