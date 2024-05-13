@@ -1,0 +1,60 @@
+import csv
+import numpy as np
+from scipy.optimize import curve_fit
+
+# Function for inverse curve fit
+def inverse_func(reflectance, a, b, c):
+    return (a / (reflectance + c)) + b
+
+# Read data from the original CSV file and select the depth and B03 band reflectance
+original_filename = 'path_to_original_CSV_file.csv'  # Replace with the path to your original CSV file
+selected_band = 'B03'
+
+depths = []
+reflectance = []
+
+with open(original_filename, 'r') as file:
+    reader = csv.DictReader(file)
+    for row in reader:
+        depth = float(row['y'])  # Assuming depth is under the 'y' column
+        band_reflectance = float(row[selected_band])
+        depths.append(depth)
+        reflectance.append(band_reflectance)
+
+# Convert lists to numpy arrays
+depths = np.array(depths)
+reflectance = np.array(reflectance)
+
+# Calculate inverse of reflectance values
+inverse_reflectance = 1.0 / reflectance
+
+# Set the maximum number of function evaluations
+maxfev = 100000
+
+# Perform inverse curve fit with increased maxfev
+inverse_params, cov_matrix = curve_fit(inverse_func, inverse_reflectance, depths, maxfev=maxfev)
+
+# Read data from the new CSV file and predict the depth values
+new_filename = 'path_to_new_CSV_file.csv'  # Replace with the path to your new CSV file
+
+predicted_depths = []
+
+with open(new_filename, 'r') as file:
+    reader = csv.DictReader(file)
+    rows = list(reader)  # Store the rows in a list before closing the file
+    for row in rows:
+        reflectance_value = float(row[selected_band])
+        inverse_reflectance_value = 1.0 / reflectance_value
+        predicted_depth = inverse_func(inverse_reflectance_value, *inverse_params)
+        predicted_depths.append(predicted_depth)
+
+# Create a new CSV file with the predicted depth values
+output_filename = 'path_to_output_CSV_file.csv'  # Replace with the desired path for the output CSV file
+
+with open(output_filename, 'w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(reader.fieldnames + ['PredictedDepth'])
+    for row, predicted_depth in zip(rows, predicted_depths):
+        writer.writerow(list(row.values()) + [predicted_depth])
+
+print(f"Predicted depth values have been saved to '{output_filename}'.")
